@@ -1,0 +1,368 @@
+*&---------------------------------------------------------------------*
+*& Report  ZTSGHR_REPORT_INVOICES
+*&
+*&---------------------------------------------------------------------*
+REPORT  ztsghr_report_invoices.
+
+TYPES: BEGIN OF y_j_1bnfdoc,
+        docnum    TYPE  j_1bnfdoc-docnum,
+        nftype    TYPE  j_1bnfdoc-nftype,
+        doctyp    TYPE  j_1bnfdoc-doctyp,
+        docdat    TYPE   j_1bnfdoc-docdat,
+        direct    TYPE  j_1bnfdoc-direct,
+        pstdat    TYPE j_1bnfdoc-pstdat,
+        credat    TYPE j_1bnfdoc-credat,
+        cretim    TYPE j_1bnfdoc-cretim,
+        crenam    TYPE j_1bnfdoc-crenam,
+       END OF y_j_1bnfdoc,
+
+       BEGIN OF y_j_1bnflin,
+         docnum  TYPE j_1bnflin-docnum,
+         itmnum  TYPE j_1bnflin-itmnum,
+         matnr   TYPE j_1bnflin-matnr,
+         bwkey   TYPE j_1bnflin-bwkey,
+         matkl  TYPE j_1bnflin-matkl,
+         matorg TYPE j_1bnflin-matorg,
+       END OF y_j_1bnflin,
+
+       BEGIN OF y_j_1bnfstx,
+         docnum TYPE j_1bnfstx-docnum,
+         itmnum TYPE j_1bnfstx-itmnum,
+         taxtyp TYPE j_1bnfstx-taxtyp,
+         base    TYPE j_1bnfstx-base,
+         rate    TYPE j_1bnfstx-rate,
+         taxval  TYPE j_1bnfstx-taxval,
+         excbas  TYPE j_1bnfstx-excbas,
+         othbas  TYPE j_1bnfstx-othbas,
+       END OF y_j_1bnfstx,
+
+       BEGIN OF y_makt,
+         matnr TYPE makt-matnr,
+         spras TYPE makt-spras,
+         maktx TYPE makt-maktx,
+       END OF y_makt,
+
+
+y_t_j_1bnfdoc       TYPE SORTED TABLE OF y_j_1bnfdoc WITH UNIQUE KEY docnum,
+y_t_j_1bnflin       TYPE SORTED TABLE OF y_j_1bnflin WITH UNIQUE KEY docnum itmnum,
+y_t_j_1bnfstx       TYPE SORTED TABLE OF y_j_1bnfstx WITH UNIQUE KEY docnum itmnum taxtyp,
+y_t_makt            TYPE SORTED TABLE OF y_makt      WITH UNIQUE KEY matnr,
+y_t_report_invoices TYPE STANDARD TABLE OF zstghr_report_invoices.
+
+DATA: w_1bnfdoc TYPE j_1bnfdoc,
+      w_lbnflin TYPE j_1bnflin.
+
+CONSTANTS: c_report_invoice TYPE dd02l-tabname VALUE'ZSTGHR_REPORT_INVOICES'.
+
+
+SELECTION-SCREEN : BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
+SELECT-OPTIONS :s_docnum    FOR w_1bnfdoc-docnum OBLIGATORY,
+                s_nftype    FOR w_1bnfdoc-nftype,
+                s_doctyp    FOR w_1bnfdoc-doctyp,
+                s_docdat    FOR w_1bnfdoc-docdat,
+                s_matnr     FOR w_lbnflin-matnr,
+                s_bwkey     FOR w_lbnflin-bwkey,
+                s_matkl     FOR w_lbnflin-matkl.
+SELECTION-SCREEN: END OF BLOCK b1.
+
+SELECTION-SCREEN: BEGIN OF BLOCK b2 WITH FRAME TITLE text-t02.
+PARAMETERS: p_doc TYPE c RADIOBUTTON GROUP a USER-COMMAND z DEFAULT 'X',
+            p_lin TYPE c RADIOBUTTON GROUP a,
+            p_stx TYPE c RADIOBUTTON GROUP a.
+SELECTION-SCREEN: END OF BLOCK b2.
+
+PERFORM zf_process_invoices.
+
+*&---------------------------------------------------------------------*
+*&      Form  ZF_PROCESS_INVOICES
+*&---------------------------------------------------------------------*
+FORM zf_process_invoices.
+
+  DATA: lt_j1bnfdoc    TYPE y_t_j_1bnfdoc,
+        lt_j1bnflin    TYPE y_t_j_1bnflin,
+        lt_j1bnfstx    TYPE y_t_j_1bnfstx,
+        lt_makt        TYPE y_t_makt,
+        lt_tb_invoices TYPE y_t_report_invoices.
+
+  PERFORM zf_read_j1bnfdoc_by_sel_scren CHANGING lt_j1bnfdoc.
+  IF lt_j1bnfdoc IS INITIAL.
+    MESSAGE text-001 TYPE 'E'.
+    RETURN.
+  ENDIF.
+
+  PERFORM zf_read_bnflin_by_bnfdoc USING lt_j1bnfdoc
+                                CHANGING lt_j1bnflin.
+
+  PERFORM zf_read_bnfstx_by_bnflin USING lt_j1bnflin
+                                CHANGING lt_j1bnfstx.
+
+  PERFORM zf_read_makt_by_bnflin USING lt_j1bnflin
+                              CHANGING lt_makt.
+
+  PERFORM zf_fill_alv_by_radiobutton USING lt_j1bnfdoc
+                                           lt_j1bnflin
+                                           lt_j1bnfstx
+                                           lt_makt
+                                  CHANGING lt_tb_invoices.
+
+
+ENDFORM.                    " ZF_PROCESS_INVOICES
+*&---------------------------------------------------------------------*
+*&      Form  ZF_READ_J1BNFDOC_BY_SEL_SCREN
+*&---------------------------------------------------------------------*
+FORM zf_read_j1bnfdoc_by_sel_scren CHANGING lt_j1bnfdoc TYPE y_t_j_1bnfdoc.
+
+  SELECT   docnum  nftype
+           doctyp  docdat
+           direct  pstdat
+           credat  cretim  crenam
+    FROM j_1bnfdoc
+    INTO TABLE lt_j1bnfdoc
+    WHERE docnum IN s_docnum
+      AND doctyp IN s_doctyp
+      AND docdat IN s_docdat.
+
+ENDFORM.                    " ZF_READ_J1BNFDOC_BY_SEL_SCREN
+*&---------------------------------------------------------------------*
+*&      Form  ZF_READ_BNFLIN_BY_BNFDOC
+*&---------------------------------------------------------------------*
+FORM zf_read_bnflin_by_bnfdoc  USING pt_j1bnfdoc TYPE y_t_j_1bnfdoc
+                            CHANGING pt_j1bnflin TYPE y_t_j_1bnflin.
+
+  CLEAR: pt_j1bnflin.
+
+  IF pt_j1bnfdoc IS INITIAL.RETURN. ENDIF.
+
+  SELECT docnum itmnum
+         matnr  bwkey
+         matkl  matorg
+    FROM j_1bnflin
+    INTO TABLE pt_j1bnflin
+    FOR ALL ENTRIES IN pt_j1bnfdoc
+    WHERE docnum EQ pt_j1bnfdoc-docnum
+      AND matnr  IN s_matnr
+      AND bwkey  IN s_bwkey
+      AND matkl  IN s_matkl.
+
+ENDFORM.                    " ZF_READ_BNFLIN_BY_BNFDOC
+*&---------------------------------------------------------------------*
+*&      Form  ZF_READ_BNFSTX_BY_BNFLIN
+*&---------------------------------------------------------------------*
+FORM zf_read_bnfstx_by_bnflin USING pt_j1bnflin TYPE  y_t_j_1bnflin
+                           CHANGING pt_j1bnfstx TYPE  y_t_j_1bnfstx.
+
+  CLEAR: pt_j1bnfstx.
+
+  IF pt_j1bnflin IS INITIAL.RETURN. ENDIF.
+
+  SELECT  docnum  itmnum
+          taxtyp  base
+          rate    taxval
+          excbas  othbas
+    FROM j_1bnfstx
+    INTO TABLE pt_j1bnfstx
+    FOR ALL ENTRIES IN pt_j1bnflin
+    WHERE docnum EQ pt_j1bnflin-docnum
+      AND itmnum EQ pt_j1bnflin-itmnum.
+
+ENDFORM.                    " ZF_READ_BNFSTX_BY_BNFLIN
+*&---------------------------------------------------------------------*
+*&      Form  ZF_READ_MAKT_BY_BNFLIN
+*&---------------------------------------------------------------------*
+FORM zf_read_makt_by_bnflin USING pt_j1bnflin TYPE y_t_j_1bnflin
+                         CHANGING pt_makt     TYPE y_t_makt.
+  CLEAR: pt_makt.
+
+  IF pt_j1bnflin IS INITIAL.RETURN. ENDIF.
+
+  SELECT matnr spras maktx
+    FROM makt
+    INTO TABLE pt_makt
+    FOR ALL ENTRIES IN pt_j1bnflin
+    WHERE matnr EQ pt_j1bnflin-matnr
+      AND spras EQ sy-langu.
+
+ENDFORM.                    " ZF_READ_MAKT_BY_BNFLIN
+*&---------------------------------------------------------------------*
+*&      Form  ZF_FILL_ALV_BY_RADIOBUTTON
+*&---------------------------------------------------------------------*
+FORM zf_fill_alv_by_radiobutton USING pt_j1bnfdoc    TYPE y_t_j_1bnfdoc
+                                      pt_j1bnflin    TYPE y_t_j_1bnflin
+                                      pt_j1bnfstx    TYPE y_t_j_1bnfstx
+                                      pt_makt        TYPE  y_t_makt
+                             CHANGING pt_tb_invoices TYPE y_t_report_invoices.
+
+  CASE 'X'.
+    WHEN p_doc.
+      PERFORM zf_start_by_j1bnfdoc USING pt_j1bnfdoc
+                                         pt_j1bnflin
+                                         pt_j1bnfstx
+                                         pt_makt
+                                CHANGING pt_tb_invoices.
+
+      PERFORM zf_show_report USING pt_tb_invoices.
+
+    WHEN p_lin.
+      PERFORM zf_start_by_j1bnflin USING pt_j1bnfdoc
+                                         pt_j1bnflin
+                                         pt_j1bnfstx
+                                         pt_makt
+                                CHANGING pt_tb_invoices.
+
+      PERFORM zf_show_report USING pt_tb_invoices.
+
+    WHEN p_stx.
+      PERFORM zf_start_by_j1bnfstx USING pt_j1bnfdoc
+                                         pt_j1bnflin
+                                         pt_j1bnfstx
+                                         pt_makt
+                                CHANGING pt_tb_invoices.
+
+      PERFORM zf_show_report USING pt_tb_invoices.
+  ENDCASE.
+
+ENDFORM.                    " ZF_FILL_ALV_BY_RADIOBUTTON
+*&---------------------------------------------------------------------*
+*&      Form  ZF_START_BY_J1BNFDOC
+*&---------------------------------------------------------------------*
+FORM zf_start_by_j1bnfdoc USING pt_j1bnfdoc    TYPE y_t_j_1bnfdoc
+                                pt_j1bnflin    TYPE y_t_j_1bnflin
+                                pt_j1bnfstx    TYPE y_t_j_1bnfstx
+                                pt_makt        TYPE  y_t_makt
+                       CHANGING pt_tb_invoices TYPE y_t_report_invoices.
+
+  DATA: lw_tb_invoices LIKE LINE OF pt_tb_invoices.
+
+  FIELD-SYMBOLS:<fs_j1bnfdoc> LIKE LINE OF pt_j1bnfdoc,
+                <fs_j1bnflin> LIKE LINE OF pt_j1bnflin,
+                <fs_j1bnfstx> LIKE LINE OF pt_j1bnfstx,
+                <fs_makt>     LIKE LINE OF pt_makt.
+
+  CLEAR: pt_tb_invoices.
+
+  LOOP AT  pt_j1bnfdoc ASSIGNING <fs_j1bnfdoc>.
+    CLEAR: lw_tb_invoices.
+    MOVE-CORRESPONDING <fs_j1bnfdoc> TO lw_tb_invoices.
+
+    LOOP AT pt_j1bnflin ASSIGNING <fs_j1bnflin> WHERE docnum  = <fs_j1bnfdoc>-docnum.
+      MOVE-CORRESPONDING <fs_j1bnflin> TO lw_tb_invoices.
+
+      LOOP AT pt_j1bnfstx ASSIGNING <fs_j1bnfstx> WHERE docnum = <fs_j1bnflin>-docnum
+                                                    AND itmnum = <fs_j1bnflin>-itmnum.
+        MOVE-CORRESPONDING <fs_j1bnfstx> TO lw_tb_invoices.
+
+        READ TABLE pt_makt ASSIGNING <fs_makt> WITH KEY matnr = <fs_j1bnflin>-matnr.
+        IF sy-subrc IS NOT INITIAL .RETURN. ENDIF.
+
+        lw_tb_invoices-maktx = <fs_makt>-maktx.
+
+        APPEND lw_tb_invoices TO pt_tb_invoices.
+      ENDLOOP.
+    ENDLOOP.
+  ENDLOOP.
+
+ENDFORM.                    " ZF_START_BY_J1BNFDOC
+*&---------------------------------------------------------------------*
+*&      Form  ZF_START_BY_J1BNFLIN
+*&---------------------------------------------------------------------*
+FORM zf_start_by_j1bnflin USING pt_j1bnfdoc    TYPE y_t_j_1bnfdoc
+                                pt_j1bnflin    TYPE y_t_j_1bnflin
+                                pt_j1bnfstx    TYPE y_t_j_1bnfstx
+                                pt_makt        TYPE  y_t_makt
+                       CHANGING pt_tb_invoices TYPE y_t_report_invoices.
+
+  DATA: lw_tb_invoices LIKE LINE OF pt_tb_invoices.
+
+  FIELD-SYMBOLS:<fs_j1bnfdoc> LIKE LINE OF pt_j1bnfdoc,
+                <fs_j1bnflin> LIKE LINE OF pt_j1bnflin,
+                <fs_j1bnfstx> LIKE LINE OF pt_j1bnfstx,
+                <fs_makt>     LIKE LINE OF pt_makt.
+
+  CLEAR: pt_tb_invoices.
+
+  LOOP AT  pt_j1bnflin ASSIGNING <fs_j1bnflin>.
+    CLEAR: lw_tb_invoices.
+    MOVE-CORRESPONDING <fs_j1bnflin> TO lw_tb_invoices.
+
+    READ TABLE pt_j1bnfdoc ASSIGNING <fs_j1bnfdoc> WITH KEY docnum  = <fs_j1bnflin>-docnum.
+    IF sy-subrc IS NOT INITIAL. RETURN. ENDIF.
+    MOVE-CORRESPONDING <fs_j1bnfdoc> TO lw_tb_invoices.
+
+    LOOP AT pt_j1bnfstx ASSIGNING <fs_j1bnfstx> WHERE docnum = <fs_j1bnflin>-docnum
+                                                  AND itmnum = <fs_j1bnflin>-itmnum.
+      MOVE-CORRESPONDING <fs_j1bnfstx> TO lw_tb_invoices.
+
+      READ TABLE pt_makt ASSIGNING <fs_makt> WITH KEY matnr = <fs_j1bnflin>-matnr.
+      IF sy-subrc IS NOT INITIAL .RETURN. ENDIF.
+
+      lw_tb_invoices-maktx = <fs_makt>-maktx.
+
+      APPEND lw_tb_invoices TO pt_tb_invoices.
+
+    ENDLOOP.
+
+  ENDLOOP.
+
+ENDFORM.                    " ZF_START_BY_J1BNFLIN
+*&---------------------------------------------------------------------*
+*&      Form  ZF_START_BY_J1BNFSTX
+*&---------------------------------------------------------------------*
+FORM zf_start_by_j1bnfstx USING pt_j1bnfdoc    TYPE y_t_j_1bnfdoc
+                                pt_j1bnflin    TYPE y_t_j_1bnflin
+                                pt_j1bnfstx    TYPE y_t_j_1bnfstx
+                                pt_makt        TYPE  y_t_makt
+                       CHANGING pt_tb_invoices TYPE y_t_report_invoices.
+
+  DATA: lw_tb_invoices LIKE LINE OF pt_tb_invoices.
+
+  FIELD-SYMBOLS:<fs_j1bnfdoc> LIKE LINE OF pt_j1bnfdoc,
+                <fs_j1bnflin> LIKE LINE OF pt_j1bnflin,
+                <fs_j1bnfstx> LIKE LINE OF pt_j1bnfstx,
+                <fs_makt>     LIKE LINE OF pt_makt.
+
+  CLEAR: pt_tb_invoices.
+
+  LOOP AT  pt_j1bnfstx ASSIGNING <fs_j1bnfstx>.
+    CLEAR: lw_tb_invoices.
+    MOVE-CORRESPONDING <fs_j1bnfstx> TO lw_tb_invoices.
+
+    READ TABLE pt_j1bnflin ASSIGNING <fs_j1bnflin> WITH TABLE KEY docnum = <fs_j1bnfstx>-docnum
+                                                                  itmnum = <fs_j1bnfstx>-itmnum.
+    IF sy-subrc IS NOT INITIAL. RETURN. ENDIF.
+
+    MOVE-CORRESPONDING <fs_j1bnflin> TO lw_tb_invoices.
+
+    READ TABLE pt_makt ASSIGNING <fs_makt> WITH KEY matnr = <fs_j1bnflin>-matnr.
+    IF sy-subrc IS NOT INITIAL .RETURN. ENDIF.
+
+    lw_tb_invoices-maktx = <fs_makt>-maktx.
+
+    READ TABLE pt_j1bnfdoc ASSIGNING <fs_j1bnfdoc> WITH KEY docnum  = <fs_j1bnfstx>-docnum.
+    IF sy-subrc IS NOT INITIAL. RETURN. ENDIF.
+
+    MOVE-CORRESPONDING <fs_j1bnfdoc> TO lw_tb_invoices.
+
+    APPEND lw_tb_invoices TO pt_tb_invoices.
+  ENDLOOP.
+
+ENDFORM.                    " ZF_START_BY_J1BNFSTX
+*&---------------------------------------------------------------------*
+*&      Form  ZF_SHOW_REPORT
+*&---------------------------------------------------------------------*
+FORM zf_show_report  USING pt_tb_invoices TYPE y_t_report_invoices.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program = sy-cprog
+      i_structure_name   = c_report_invoice
+    TABLES
+      t_outtab           = pt_tb_invoices
+    EXCEPTIONS
+      program_error      = 1
+      OTHERS             = 2.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " ZF_SHOW_REPORT
